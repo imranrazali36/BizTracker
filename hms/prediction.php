@@ -28,7 +28,7 @@ $userName = $userData['fullName'] ?? 'User';
 // ============================================================
 $startDate      = '';
 $endDate        = '';
-$dateCondition  = '';   // used only after validation
+$dateCondition  = '';
 $dateError      = '';
 $targetProfit   = 0;
 $noDataMessage  = '';
@@ -227,7 +227,7 @@ if (isset($_POST['predict'])) {
         if ($chkRow['bCount'] == 0 && $chkRow['eCount'] == 0) {
             $noDataMessage = "No financial data available for this period.";
         } else {
-            // 4. Fetch totals — prepared statements, NO raw variables in SQL
+            // 4. Fetch totals — prepared statements
             $bStmt = $con->prepare(
                 "SELECT COALESCE(SUM(amount), 0) AS total
                  FROM budgets WHERE user_id = ? AND date_created BETWEEN ? AND ?"
@@ -247,7 +247,7 @@ if (isset($_POST['predict'])) {
             $eStmt->close();
 
             if ($budgetTotal > 0) {
-                // 5. Check session cache for trained weights (performance fix)
+                // 5. Check session cache for trained weights
                 $cacheKey = "nn_{$userId}_{$startDate}_{$endDate}";
                 if (isset($_SESSION['nn_weights'][$cacheKey])) {
                     $weights = $_SESSION['nn_weights'][$cacheKey];
@@ -269,7 +269,7 @@ if (isset($_POST['predict'])) {
                     $_SESSION['nn_weights'][$cacheKey] = $weights;
                 }
 
-                $inputFeatures  = extractFinancialFeatures($budgetTotal, $expenseTotal);
+                $inputFeatures   = extractFinancialFeatures($budgetTotal, $expenseTotal);
                 $predictionValue = predict($inputFeatures, $weights);
                 $percentage      = $predictionValue * 100;
 
@@ -280,7 +280,7 @@ if (isset($_POST['predict'])) {
                 $targetRiskAdjustment = 0;
 
                 if ($targetProfit > 0) {
-                    $profitGap   = $targetProfit - $actualProfit;
+                    $profitGap    = $targetProfit - $actualProfit;
                     $stretchRatio = ($targetProfit - $actualProfit) / $budgetTotal;
 
                     if ($stretchRatio <= 0) {
@@ -299,7 +299,7 @@ if (isset($_POST['predict'])) {
                     }
                 }
 
-                // 7. Five-level risk assessment (matches the guidelines modal)
+                // 7. Five-level risk assessment
                 if ($percentage > 75) {
                     $predictionLevel = 'Critical Risk';
                     $predictionColor = 'text-red-600';
@@ -317,7 +317,7 @@ if (isset($_POST['predict'])) {
                     $predictionColor = 'text-green-600';
                 }
 
-                // 8. Build explanation — all user-controlled values escaped
+                // 8. Build explanation
                 $escapedTarget  = htmlspecialchars(number_format($targetProfit, 2), ENT_QUOTES, 'UTF-8');
                 $escapedGap     = htmlspecialchars(number_format(abs($profitGap), 2), ENT_QUOTES, 'UTF-8');
                 $baseRiskStr    = number_format($predictionValue * 100, 2);
@@ -340,7 +340,7 @@ if (isset($_POST['predict'])) {
                     }
                 }
 
-                // 9. Suggestion text — escaped values only
+                // 9. Suggestion text
                 if ($targetProfit > 0 && $profitGap > 0) {
                     $feasStr    = htmlspecialchars($feasibilityStatus, ENT_QUOTES, 'UTF-8');
                     $feasScore  = number_format($feasibilityScore, 1);
@@ -356,9 +356,7 @@ if (isset($_POST['predict'])) {
                     $predictionSuggestion .= "4. Recommendation: {$recStr}";
                 }
 
-                $showPopup = true;
-
-                // Store totals for reuse below (avoids duplicate queries)
+                $showPopup    = true;
                 $totalBudget  = $budgetTotal;
                 $totalExpense = $expenseTotal;
                 $totalProfit  = $totalBudget - $totalExpense;
@@ -368,11 +366,9 @@ if (isset($_POST['predict'])) {
 }
 
 // ============================================================
-// SUMMARY TOTALS FOR DISPLAY — only query if not already set
-// from the prediction block above (avoids duplicate queries)
+// SUMMARY TOTALS FOR DISPLAY
 // ============================================================
 if ($totalBudget == 0 && $totalExpense == 0) {
-    // Build a safe date condition only when valid dates exist
     if (!empty($startDate) && !empty($endDate) && validateDate($startDate) && validateDate($endDate)) {
         $sumBStmt = $con->prepare(
             "SELECT COALESCE(SUM(amount), 0) AS total FROM budgets WHERE user_id = ? AND date_created BETWEEN ? AND ?"
@@ -390,7 +386,6 @@ if ($totalBudget == 0 && $totalExpense == 0) {
         $totalExpense = (float) $sumEStmt->get_result()->fetch_assoc()['total'];
         $sumEStmt->close();
     } else {
-        // No date filter — show all-time totals
         $sumBStmt = $con->prepare("SELECT COALESCE(SUM(amount), 0) AS total FROM budgets WHERE user_id = ?");
         $sumBStmt->bind_param("i", $userId);
         $sumBStmt->execute();
@@ -407,7 +402,7 @@ if ($totalBudget == 0 && $totalExpense == 0) {
 }
 
 // ============================================================
-// CATEGORY SUMMARY — single JOIN query (replaces N+1 loop)
+// CATEGORY SUMMARY — single JOIN query
 // ============================================================
 $categoryRows = [];
 if (!empty($startDate) && !empty($endDate) && validateDate($startDate) && validateDate($endDate)) {
@@ -450,7 +445,6 @@ $catStmt->close();
 ?>
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -462,131 +456,53 @@ $catStmt->close();
     <link rel="icon" type="image/png" href="assets/images/biztracker.png">
     <link rel="shortcut icon" href="assets/images/biztracker.png">
     <style>
-        body {
-            font-family: 'Inter', sans-serif;
-        }
-
+        body { font-family: 'Inter', sans-serif; }
         .sidebar {
             width: 280px;
             transition: all 0.3s ease;
             background: linear-gradient(180deg, #4b6cb7 0%, #182848 100%);
         }
-
+        .sidebar.collapsed { width: 0; overflow: hidden; }
         .main-content {
             margin-left: 280px;
             transition: all 0.3s ease;
             background: rgb(235, 235, 235);
         }
-
-        .nav-link {
-            transition: all 0.3s ease;
-        }
-
-        .nav-link:hover {
-            background-color: rgba(255, 255, 255, 0.1);
-        }
-
-        .nav-link.active {
-            background-color: rgba(255, 255, 255, 0.1);
-            border-left: 4px solid #fff;
-        }
-
+        .main-content.collapsed { margin-left: 0; }
+        .nav-link { transition: all 0.3s ease; }
+        .nav-link:hover { background-color: rgba(255,255,255,0.1); }
+        .nav-link.active { background-color: rgba(255,255,255,0.1); border-left: 4px solid #fff; }
         @media (max-width: 768px) {
-            .sidebar {
-                margin-left: -280px;
-            }
-
-            .sidebar.active {
-                margin-left: 0;
-            }
-
-            .main-content {
-                margin-left: 0;
-            }
-
-            .main-content.active {
-                margin-left: 280px;
-            }
+            .sidebar { margin-left: -280px; }
+            .sidebar.active { margin-left: 0; }
+            .sidebar.collapsed { width: 280px; margin-left: -280px; }
+            .sidebar.collapsed.active { margin-left: 0; }
+            .main-content { margin-left: 0; }
+            .main-content.active { margin-left: 280px; }
+            .main-content.collapsed { margin-left: 0; }
         }
-
-        .footer {
-            background: #182848;
-            color: #fff;
-            padding: 40px 0;
-        }
-
-        .footer a {
-            color: #ffc107;
-        }
-
-        .footer a:hover {
-            color: #fff;
-        }
-
         .btn {
-            display: inline-block;
-            padding: 8px 16px;
-            border-radius: 4px;
-            text-align: center;
-            text-decoration: none;
-            font-size: 14px;
-            transition: transform 0.2s ease-in-out, background-color 0.3s ease;
-            color: white;
+            display: inline-block; padding: 8px 16px; border-radius: 4px;
+            text-align: center; text-decoration: none; font-size: 14px;
+            transition: transform 0.2s ease-in-out, background-color 0.3s ease; color: white;
         }
-
-        .btn-edit {
-            background-color: #4CAF50;
-        }
-
-        .btn-edit:hover {
-            background-color: #45a049;
-            transform: scale(1.1);
-        }
-
-        .btn-delete {
-            background-color: #f44336;
-        }
-
-        .btn-delete:hover {
-            background-color: #e53935;
-            transform: scale(1.1);
-        }
-
-        .btn:active {
-            transform: scale(1);
-        }
-
-        .metric-card {
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-        }
-
-        .metric-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
-        }
-
-        .graph-container {
-            transition: all 0.3s ease;
-        }
-
-        .graph-container:hover {
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
-        }
+        .btn-edit { background-color: #4CAF50; }
+        .btn-edit:hover { background-color: #45a049; transform: scale(1.1); }
+        .btn:active { transform: scale(1); }
+        .metric-card { transition: transform 0.3s ease, box-shadow 0.3s ease; }
+        .metric-card:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.1); }
     </style>
 </head>
-
 <body style="background:rgb(235,235,235);">
+
     <!-- Sidebar -->
     <div class="sidebar fixed h-full text-white">
-        <!-- Logo Section -->
         <div class="p-5 bg-[#182848]">
             <h2 class="text-xl font-bold flex items-center space-x-2">
                 <img src="assets/images/biztracker.png" alt="BizTracker Logo" class="w-7 h-7 object-contain">
                 <span>BizTracker</span>
             </h2>
         </div>
-
-        <!-- User Profile Section -->
         <div class="p-4 border-b border-white/10">
             <div class="flex items-center space-x-3">
                 <div class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
@@ -598,69 +514,39 @@ $catStmt->close();
                 </div>
             </div>
         </div>
-
-        <!-- Navigation Menu -->
         <nav class="mt-4 px-3">
             <div class="mb-2">
                 <p class="px-3 text-xs font-semibold text-white/70 uppercase tracking-wider">Main Menu</p>
             </div>
-
-            <a href="dashboard.php"
-                class="nav-link flex items-center space-x-3 px-3 py-3 rounded-lg font-medium text-white/80 hover:text-white">
-                <i class="fas fa-tachometer-alt w-5 text-center"></i>
-                <span>Dashboard</span>
+            <a href="dashboard.php" class="nav-link flex items-center space-x-3 px-3 py-3 rounded-lg font-medium text-white/80 hover:text-white">
+                <i class="fas fa-tachometer-alt w-5 text-center"></i><span>Dashboard</span>
             </a>
-
-            <a href="expense.php"
-                class="nav-link flex items-center space-x-3 px-3 py-3 rounded-lg font-medium text-white/80 hover:text-white">
-                <i class="fas fa-solid fa-comments-dollar w-5 text-center"></i>
-                <span>Expense Management</span>
+            <a href="expense.php" class="nav-link flex items-center space-x-3 px-3 py-3 rounded-lg font-medium text-white/80 hover:text-white">
+                <i class="fas fa-solid fa-comments-dollar w-5 text-center"></i><span>Expense Management</span>
             </a>
-
-            <a href="budget.php"
-                class="nav-link flex items-center space-x-3 px-3 py-3 rounded-lg font-medium text-white/80 hover:text-white">
-                <i class="fas fa-solid fa-dollar-sign w-5 text-center"></i>
-                <span>Income Management</span>
+            <a href="budget.php" class="nav-link flex items-center space-x-3 px-3 py-3 rounded-lg font-medium text-white/80 hover:text-white">
+                <i class="fas fa-solid fa-dollar-sign w-5 text-center"></i><span>Income Management</span>
             </a>
-
-            <a href="category.php"
-                class="nav-link flex items-center space-x-3 px-3 py-3 rounded-lg font-medium text-white/80 hover:text-white">
-                <i class="fas fa-solid fa-list w-5 text-center"></i>
-                <span>Category Management</span>
+            <a href="category.php" class="nav-link flex items-center space-x-3 px-3 py-3 rounded-lg font-medium text-white/80 hover:text-white">
+                <i class="fas fa-solid fa-list w-5 text-center"></i><span>Category Management</span>
             </a>
-
-            <a href="prediction.php"
-                class="nav-link active flex items-center space-x-3 px-3 py-3 rounded-lg font-medium text-white">
-                <i class="fas fa-solid fa-gear w-5 text-center"></i>
-                <span>Prediction Management</span>
+            <a href="prediction.php" class="nav-link active flex items-center space-x-3 px-3 py-3 rounded-lg font-medium text-white">
+                <i class="fas fa-solid fa-gear w-5 text-center"></i><span>Prediction Management</span>
             </a>
-
-            <a href="feedback.php"
-                class="nav-link flex items-center space-x-3 px-3 py-3 rounded-lg font-medium text-white/80 hover:text-white">
-                <i class="fas fa-solid fa-envelope w-5 text-center"></i>
-                <span>Feedback Management</span>
+            <a href="feedback.php" class="nav-link flex items-center space-x-3 px-3 py-3 rounded-lg font-medium text-white/80 hover:text-white">
+                <i class="fas fa-solid fa-envelope w-5 text-center"></i><span>Feedback Management</span>
             </a>
-
             <div class="mt-4 mb-2">
                 <p class="px-3 text-xs font-semibold text-white/70 uppercase tracking-wider">Account Settings</p>
             </div>
-
-            <a href="edit-profile.php"
-                class="nav-link flex items-center space-x-3 px-3 py-3 rounded-lg font-medium text-white/80 hover:text-white">
-                <i class="fas fa-user-edit w-5 text-center"></i>
-                <span>My Profile</span>
+            <a href="edit-profile.php" class="nav-link flex items-center space-x-3 px-3 py-3 rounded-lg font-medium text-white/80 hover:text-white">
+                <i class="fas fa-user-edit w-5 text-center"></i><span>My Profile</span>
             </a>
-
-            <a href="change-password.php"
-                class="nav-link flex items-center space-x-3 px-3 py-3 rounded-lg font-medium text-white/80 hover:text-white">
-                <i class="fas fa-lock w-5 text-center"></i>
-                <span>Change Password</span>
+            <a href="change-password.php" class="nav-link flex items-center space-x-3 px-3 py-3 rounded-lg font-medium text-white/80 hover:text-white">
+                <i class="fas fa-lock w-5 text-center"></i><span>Change Password</span>
             </a>
-
-            <a href="logout.php" onclick="return confirmLogout()"
-                class="nav-link flex items-center space-x-3 px-3 py-3 rounded-lg font-medium text-white/80 hover:text-white">
-                <i class="fas fa-sign-out-alt w-5 text-center"></i>
-                <span>Log Out</span>
+            <a href="logout.php" onclick="return confirmLogout()" class="nav-link flex items-center space-x-3 px-3 py-3 rounded-lg font-medium text-white/80 hover:text-white">
+                <i class="fas fa-sign-out-alt w-5 text-center"></i><span>Log Out</span>
             </a>
         </nav>
     </div>
@@ -668,15 +554,17 @@ $catStmt->close();
     <!-- Main Content -->
     <div class="main-content min-h-screen">
 
-        <!-- Header -->
+        <!-- Header — full-width, always-visible toggle matching budget/expense -->
         <header class="bg-gradient-to-r from-[#4b6cb7] to-[#182848] text-white">
             <div class="h-1 bg-white/10"></div>
-            <div class="container mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div class="w-full px-4 sm:px-6 py-4">
                 <div class="flex items-center justify-between">
-                    <button id="sidebarToggle" class="md:hidden text-white">
-                        <i class="fas fa-bars text-xl"></i>
-                    </button>
-                    <div class="flex items-center space-x-4">
+                    <div class="flex items-center space-x-3">
+                        <button id="sidebarToggle"
+                                class="text-white -ml-1 rounded hover:bg-white/10 transition-colors w-8 h-8 flex items-center justify-center flex-shrink-0"
+                                title="Toggle sidebar">
+                            <i class="fas fa-bars text-xl"></i>
+                        </button>
                         <h1 class="text-2xl font-semibold">Prediction</h1>
                     </div>
                     <nav class="flex items-center space-x-4">
@@ -710,8 +598,7 @@ $catStmt->close();
                     </div>
                 <?php endif; ?>
 
-                <form method="post" class="mb-4 row g-3">
-                    <!-- CSRF token -->
+                <form method="post" class="mb-4">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'], ENT_QUOTES, 'UTF-8'); ?>">
 
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-2">
@@ -719,19 +606,16 @@ $catStmt->close();
                             <label for="start_date" class="block text-gray-700 font-medium mb-1">Start Date <span class="text-red-500">*</span></label>
                             <input type="date" id="start_date" name="start_date"
                                 value="<?php echo htmlspecialchars($startDate, ENT_QUOTES, 'UTF-8'); ?>"
-                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
-                                required>
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" required>
                             <p class="text-xs text-gray-400 mt-2 flex items-center gap-1">
                                 <i class="fas fa-info-circle"></i> The earliest date to include in the analysis period.
                             </p>
                         </div>
-
                         <div>
                             <label for="end_date" class="block text-gray-700 font-medium mb-1">End Date <span class="text-red-500">*</span></label>
                             <input type="date" id="end_date" name="end_date"
                                 value="<?php echo htmlspecialchars($endDate, ENT_QUOTES, 'UTF-8'); ?>"
-                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
-                                required>
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" required>
                             <p class="text-xs text-gray-400 mt-2 flex items-center gap-1">
                                 <i class="fas fa-info-circle"></i> Must be on or after the start date.
                             </p>
@@ -749,7 +633,6 @@ $catStmt->close();
                         </p>
                     </div>
 
-                    <!-- Info banner -->
                     <div class="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
                         <i class="fas fa-exclamation-triangle text-amber-500 mt-0.5 flex-shrink-0 text-sm"></i>
                         <p class="text-xs text-amber-700">
@@ -765,7 +648,6 @@ $catStmt->close();
                             </button>
                             <span class="text-sm text-gray-600">Learn how our algorithm works.</span>
                         </div>
-
                         <button type="submit" name="predict" id="predictBtn"
                             class="btn btn-edit px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 opacity-50 cursor-not-allowed"
                             disabled>
@@ -776,100 +658,34 @@ $catStmt->close();
             </div>
 
             <!-- Guidelines Modal -->
-            <div id="modal"
-                class="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 opacity-0 pointer-events-none transition-opacity duration-300">
-                <div id="content"
-                    class="bg-white w-full max-w-4xl p-6 rounded shadow-lg overflow-y-auto max-h-[90vh] relative transform scale-95 transition-transform duration-300">
-                    <button onclick="toggleModal()"
-                        class="absolute top-2 right-2 text-gray-600 hover:text-black text-xl font-bold">&times;</button>
-
+            <div id="modal" class="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 opacity-0 pointer-events-none transition-opacity duration-300">
+                <div id="content" class="bg-white w-full max-w-4xl p-6 rounded shadow-lg overflow-y-auto max-h-[90vh] relative transform scale-95 transition-transform duration-300">
+                    <button onclick="toggleModal()" class="absolute top-2 right-2 text-gray-600 hover:text-black text-xl font-bold">&times;</button>
                     <h3 class="text-2xl font-bold text-gray-800 mb-4">Prediction System Guidelines</h3>
-
-                    <p class="mb-4 text-gray-700">
-                        Our prediction system uses the <strong>Backpropagation Neural Network (BPNN)</strong> to analyze
-                        income, expenses, and financial ratios to predict your business failure risk.
-                    </p>
-
-                    <div class="space-y-6">
-                        <p class="mb-4 text-gray-700">
-                        <h4 class="text-lg font-semibold text-blue-700">Step 1: User Inputs the Date Range</h4>
-                        The prediction process begins with the user accessing the prediction.php page within the
-                        BizTracker system. The user is presented with a form that requires the selection of a start date
-                        and an end date. These dates are used to filter the financial data—namely the budget (income) and
-                        expenses—within the specified time range. Once the user submits the form by clicking on the
-                        "Predict Failure Rate" button, the server initiates the prediction process in the background
-                        using the neural network logic coded in PHP.
-                        </p>
-                    </div>
-
-                    <div class="space-y-6">
-                        <p class="mb-4 text-gray-700">
-                        <h4 class="text-lg font-semibold text-blue-700">Step 2: Retrieving Financial Data</h4>
-                        After the form submission, the application fetches the financial data relevant to the user from
-                        two primary sources: the budgets table and the expenses table in the database. These queries are
-                        filtered by the logged-in user's ID and constrained within the chosen date range. The system
-                        then calculates the total amount of income (budget) and the total expenses over this period.
-                        </p>
-                    </div>
-
-                    <div class="space-y-6">
-                        <p class="mb-4 text-gray-700">
-                        <h4 class="text-lg font-semibold text-blue-700">Step 3: Financial Feature Extraction</h4>
-                        With the raw totals for budget and expenses retrieved, the system then generates numerical
-                        features that are used as inputs to the neural network. These features are engineered to capture
-                        key financial metrics:
-                        <li><strong>Expense Ratio:</strong> <strong>expenseTotal / budgetTotal</strong></li>
-                        <li><strong>Profit Margin:</strong> <strong>(budgetTotal - expenseTotal) / budgetTotal</strong></li>
-                        <li><strong>Log of Expenses:</strong> Normalises large numeric differences.</li>
-                        <li><strong>Log of Budget:</strong> Normalises income values.</li>
-                        <li><strong>Conservative Ratio:</strong> Measures if expenses are nearing a critical point.</li>
-                        </p>
-                    </div>
-
-                    <div class="space-y-6">
-                        <p class="mb-4 text-gray-700">
-                        <h4 class="text-lg font-semibold text-blue-700">Step 4: Training Dataset Simulation</h4>
-                        The system generates three sets of input-output pairs:
-                        <li><strong>Current Scenario:</strong> Actual extracted features.</li>
-                        <li><strong>Worse Scenario:</strong> Expense features increased by 20%.</li>
-                        <li><strong>Better Scenario:</strong> Expense features decreased by 20%.</li>
-                        </p>
-                    </div>
-
-                    <div class="space-y-6">
-                        <p class="mb-4 text-gray-700">
-                        <h4 class="text-lg font-semibold text-blue-700">Step 5: Neural Network Initialization</h4>
-                        The system initialises a <strong>BPNN</strong> with:
-                        <li><strong>Input Layer:</strong> 5 neurons processing financial ratios</li>
-                        <li><strong>Hidden Layer:</strong> 6 neurons with Leaky ReLU activation</li>
-                        <li><strong>Output Layer:</strong> 1 neuron with sigmoid activation (0–100% risk)</li>
-                        </p>
-                    </div>
-
-                    <div class="space-y-6">
-                        <p class="mb-4 text-gray-700">
-                        <h4 class="text-lg font-semibold text-blue-700">Step 6: Network Training with Backpropagation and Adam Optimizer</h4>
-                        The neural network is trained for 3000 epochs using the training data with the Adam optimizer.
-                        Trained weights are cached in the session for the same date range to avoid redundant computation.
-                        </p>
-                        <img src="assets/images/bpnn.png" alt="Data Processing Flow" class="my-2 w-124 mx-auto">
-                    </div>
-
-                    <div class="space-y-6">
-                        <p class="mb-4 text-gray-700">
-                        <h4 class="text-lg font-semibold text-blue-700">Step 7: Making the Prediction</h4>
-                        Once training is complete, the system performs a forward pass to produce a prediction score
-                        between 0 and 1, scaled to a percentage representing failure risk.
-                        </p>
-                        <img src="assets/images/riskpercentage.png" alt="Risk Interpretation Guide"
-                            class="my-2 w-full w-[400px] mx-auto">
-                        <ul class="list-disc list-inside text-gray-600">
-                            <li><strong>Critical Risk (&gt;75%):</strong> Immediate action required</li>
-                            <li><strong>High Risk (60–75%):</strong> Significant improvements needed</li>
-                            <li><strong>Moderate Risk (45–60%):</strong> Recommended adjustments</li>
-                            <li><strong>Low Risk (30–45%):</strong> Maintain current practices</li>
-                            <li><strong>Very Low Risk (≤30%):</strong> Healthy financial status</li>
-                        </ul>
+                    <p class="mb-4 text-gray-700">Our prediction system uses the <strong>Backpropagation Neural Network (BPNN)</strong> to analyze income, expenses, and financial ratios to predict your business failure risk.</p>
+                    <div class="space-y-4">
+                        <div><h4 class="text-lg font-semibold text-blue-700">Step 1: User Inputs the Date Range</h4><p class="text-gray-700">The prediction process begins with the user accessing the prediction.php page. The user selects a start date and an end date to filter financial data within the specified time range.</p></div>
+                        <div><h4 class="text-lg font-semibold text-blue-700">Step 2: Retrieving Financial Data</h4><p class="text-gray-700">The application fetches income (budgets) and expense totals from the database filtered by the user's ID and chosen date range.</p></div>
+                        <div><h4 class="text-lg font-semibold text-blue-700">Step 3: Financial Feature Extraction</h4><p class="text-gray-700">Five features are computed: Expense Ratio, Profit Margin, Log of Expenses, Log of Budget, and Conservative Ratio.</p></div>
+                        <div><h4 class="text-lg font-semibold text-blue-700">Step 4: Training Dataset Simulation</h4><p class="text-gray-700">Three scenarios are generated: current, +20% expense (worse), and -20% expense (better).</p></div>
+                        <div><h4 class="text-lg font-semibold text-blue-700">Step 5: Neural Network Initialization</h4><p class="text-gray-700">A BPNN is initialised with 5 input neurons, 6 hidden neurons (Leaky ReLU), and 1 output neuron (Sigmoid).</p></div>
+                        <div>
+                            <h4 class="text-lg font-semibold text-blue-700">Step 6: Network Training with Backpropagation and Adam Optimizer</h4>
+                            <p class="text-gray-700">The neural network is trained for 3000 epochs using the Adam optimizer. Trained weights are cached in the session for the same date range.</p>
+                            <img src="assets/images/bpnn.png" alt="BPNN Diagram" class="my-2 w-124 mx-auto">
+                        </div>
+                        <div>
+                            <h4 class="text-lg font-semibold text-blue-700">Step 7: Making the Prediction</h4>
+                            <p class="text-gray-700">A forward pass produces a failure risk percentage.</p>
+                            <img src="assets/images/riskpercentage.png" alt="Risk Interpretation" class="my-2 w-full w-[400px] mx-auto">
+                            <ul class="list-disc list-inside text-gray-600">
+                                <li><strong>Critical Risk (&gt;75%):</strong> Immediate action required</li>
+                                <li><strong>High Risk (60–75%):</strong> Significant improvements needed</li>
+                                <li><strong>Moderate Risk (45–60%):</strong> Recommended adjustments</li>
+                                <li><strong>Low Risk (30–45%):</strong> Maintain current practices</li>
+                                <li><strong>Very Low Risk (≤30%):</strong> Healthy financial status</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -886,7 +702,6 @@ $catStmt->close();
 
                 <?php if (!empty($predictionLevel)): ?>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                        <!-- Risk Box -->
                         <div class="p-4 bg-white rounded-lg shadow border-l-4 <?php echo $percentage > 60 ? 'border-red-500' : 'border-green-500'; ?>">
                             <h4 class="text-sm font-semibold text-gray-500 uppercase">Total Risk Level</h4>
                             <p class="text-2xl font-bold <?php echo htmlspecialchars($predictionColor, ENT_QUOTES, 'UTF-8'); ?>">
@@ -894,7 +709,6 @@ $catStmt->close();
                                 (<?php echo number_format($percentage, 2); ?>%)
                             </p>
                         </div>
-
                         <?php if ($targetProfit > 0): ?>
                             <div class="p-4 bg-white rounded-lg shadow border-l-4 <?php echo $feasibilityScore > 50 ? 'border-blue-500' : 'border-yellow-500'; ?>">
                                 <h4 class="text-sm font-semibold text-gray-500 uppercase">Goal Feasibility Score</h4>
@@ -902,15 +716,11 @@ $catStmt->close();
                                     <?php echo htmlspecialchars($feasibilityStatus, ENT_QUOTES, 'UTF-8'); ?>
                                 </p>
                                 <div class="w-full bg-gray-200 rounded-full h-2 mt-2">
-                                    <div class="bg-blue-600 h-2 rounded-full"
-                                        style="width: <?php echo (int) min(100, max(0, $feasibilityScore)); ?>%">
-                                    </div>
+                                    <div class="bg-blue-600 h-2 rounded-full" style="width: <?php echo (int) min(100, max(0, $feasibilityScore)); ?>%"></div>
                                 </div>
                             </div>
                         <?php endif; ?>
                     </div>
-
-                    <!-- Explanation Box -->
                     <div class="alert-info mb-4 p-4 bg-blue-50 text-blue-800 rounded border border-blue-200">
                         <p class="leading-relaxed"><?php echo $predictionExplanation; ?></p>
                     </div>
@@ -921,7 +731,7 @@ $catStmt->close();
                     Generate Prediction Report
                 </button>
 
-                <!-- Overall Summary Cards -->
+                <!-- Overall Financial Summary -->
                 <section class="overall-summary container mx-auto mt-8">
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
                         <h2 class="text-2xl font-semibold text-gray-700">Overall <span class="text-[#4b6cb7]">Financial Statement</span></h2>
@@ -944,26 +754,20 @@ $catStmt->close();
                             </div>
                             <div>
                                 <h3 class="summary-title text-sm font-semibold text-gray-500 uppercase tracking-wide">Total Income</h3>
-                                <p class="summary-value text-xl font-bold text-[#182848]">
-                                    RM <?php echo number_format($totalBudget, 2); ?>
-                                </p>
+                                <p class="summary-value text-xl font-bold text-[#182848]">RM <?php echo number_format($totalBudget, 2); ?></p>
                             </div>
                         </div>
-
                         <div class="summary-card bg-white rounded-lg shadow-md p-6 flex items-center space-x-4">
                             <div class="p-4 bg-red-100 rounded-full text-red-600">
                                 <i class="fas fa-coins text-2xl"></i>
                             </div>
                             <div>
                                 <h3 class="summary-title text-sm font-semibold text-gray-500 uppercase tracking-wide">Total Expense</h3>
-                                <p class="summary-value text-xl font-bold text-[#182848]">
-                                    RM <?php echo number_format($totalExpense, 2); ?>
-                                </p>
+                                <p class="summary-value text-xl font-bold text-[#182848]">RM <?php echo number_format($totalExpense, 2); ?></p>
                             </div>
                         </div>
-
                         <?php
-                        $profitPositive = $totalProfit >= 0;
+                        $profitPositive    = $totalProfit >= 0;
                         $profitBorderClass = $profitPositive ? '' : 'border-l-4 border-red-400';
                         $profitIconBg      = $profitPositive ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600';
                         $profitValueClass  = $profitPositive ? 'text-[#182848]' : 'text-red-600';
@@ -974,9 +778,7 @@ $catStmt->close();
                             </div>
                             <div>
                                 <h3 class="summary-title text-sm font-semibold text-gray-500 uppercase tracking-wide">Net Profit</h3>
-                                <p class="summary-value text-xl font-bold <?php echo $profitValueClass; ?>">
-                                    RM <?php echo number_format($totalProfit, 2); ?>
-                                </p>
+                                <p class="summary-value text-xl font-bold <?php echo $profitValueClass; ?>">RM <?php echo number_format($totalProfit, 2); ?></p>
                                 <?php if (!$profitPositive): ?>
                                     <p class="text-xs text-red-500 mt-0.5">Expenses exceed income</p>
                                 <?php endif; ?>
@@ -985,11 +787,10 @@ $catStmt->close();
                     </div>
 
                     <?php if ($totalBudget > 0): ?>
-                    <!-- Expense ratio bar -->
                     <?php
-                    $expRatio  = min(100, round(($totalExpense / $totalBudget) * 100, 1));
-                    $barColor  = $expRatio > 90 ? 'bg-red-500' : ($expRatio > 70 ? 'bg-orange-400' : 'bg-green-500');
-                    $barLabel  = $expRatio > 90 ? 'Critical' : ($expRatio > 70 ? 'Watch' : 'Healthy');
+                    $expRatio      = min(100, round(($totalExpense / $totalBudget) * 100, 1));
+                    $barColor      = $expRatio > 90 ? 'bg-red-500' : ($expRatio > 70 ? 'bg-orange-400' : 'bg-green-500');
+                    $barLabel      = $expRatio > 90 ? 'Critical' : ($expRatio > 70 ? 'Watch' : 'Healthy');
                     $barLabelColor = $expRatio > 90 ? 'text-red-600' : ($expRatio > 70 ? 'text-orange-500' : 'text-green-600');
                     ?>
                     <div class="mt-5 p-4 bg-gray-50 rounded-lg border border-gray-200">
@@ -1002,8 +803,7 @@ $catStmt->close();
                             </span>
                         </div>
                         <div class="w-full bg-gray-200 rounded-full h-2.5">
-                            <div class="<?php echo $barColor; ?> h-2.5 rounded-full transition-all"
-                                 style="width:<?php echo $expRatio; ?>%"></div>
+                            <div class="<?php echo $barColor; ?> h-2.5 rounded-full transition-all" style="width:<?php echo $expRatio; ?>%"></div>
                         </div>
                         <p class="text-xs text-gray-400 mt-1.5">
                             For every RM1.00 earned, RM<?php echo number_format($totalBudget > 0 ? $totalExpense / $totalBudget : 0, 2); ?> is spent.
@@ -1012,7 +812,7 @@ $catStmt->close();
                     <?php endif; ?>
                 </section>
 
-                <!-- Category-wise Summary — rendered from pre-fetched $categoryRows (single JOIN query) -->
+                <!-- Category-wise Summary -->
                 <div class="mt-10 bg-white">
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
                         <h2 class="text-2xl font-semibold text-gray-700">Category-wise <span class="text-[#4b6cb7]">Financial Summary</span></h2>
@@ -1023,21 +823,16 @@ $catStmt->close();
                     </div>
                     <section class="category-summary container mx-auto mt-4">
                         <?php
-                        // Pre-compute totals for % share bars
-                        $totalSales   = array_sum(array_column(array_filter($categoryRows, fn($r) => $r['category_type'] === 'Sales'),   'total_budget'));
-                        $totalExpCat  = array_sum(array_column(array_filter($categoryRows, fn($r) => $r['category_type'] === 'Expense'), 'total_expense'));
-
-                        // Separate into two groups
+                        $totalSales  = array_sum(array_column(array_filter($categoryRows, fn($r) => $r['category_type'] === 'Sales'),   'total_budget'));
+                        $totalExpCat = array_sum(array_column(array_filter($categoryRows, fn($r) => $r['category_type'] === 'Expense'), 'total_expense'));
                         $salesRows   = array_filter($categoryRows, fn($r) => $r['category_type'] === 'Sales'   && (float)$r['total_budget']  > 0);
                         $expenseRows = array_filter($categoryRows, fn($r) => $r['category_type'] === 'Expense' && (float)$r['total_expense'] > 0);
                         $hasAny      = !empty($salesRows) || !empty($expenseRows);
                         ?>
-
                         <?php if (!$hasAny): ?>
                             <p class="text-gray-400 text-sm py-4">No category data for this period.</p>
                         <?php else: ?>
 
-                        <!-- Sales categories -->
                         <?php if (!empty($salesRows)): ?>
                         <div class="mb-6">
                             <p class="text-xs font-bold text-blue-600 uppercase tracking-widest mb-3 flex items-center gap-2">
@@ -1049,7 +844,10 @@ $catStmt->close();
                                     $catBudget = (float) $category['total_budget'];
                                     $sharePct  = $totalSales > 0 ? round(($catBudget / $totalSales) * 100, 1) : 0;
                                 ?>
-                                <div class="category-card bg-white rounded-lg shadow-sm border-l-4 border-blue-400 p-4">
+                                <div class="category-card bg-white rounded-lg shadow-sm border-l-4 border-blue-400 p-4"
+                                     data-type="Sales"
+                                     data-name="<?php echo htmlspecialchars($catName, ENT_QUOTES, 'UTF-8'); ?>"
+                                     data-amount="<?php echo number_format($catBudget, 2); ?>">
                                     <div class="flex justify-between items-start mb-2">
                                         <h5 class="category-title text-sm font-semibold text-gray-800">
                                             <?php echo htmlspecialchars($catName, ENT_QUOTES, 'UTF-8'); ?>
@@ -1074,7 +872,6 @@ $catStmt->close();
                         </div>
                         <?php endif; ?>
 
-                        <!-- Expense categories -->
                         <?php if (!empty($expenseRows)): ?>
                         <div>
                             <p class="text-xs font-bold text-red-600 uppercase tracking-widest mb-3 flex items-center gap-2">
@@ -1086,7 +883,10 @@ $catStmt->close();
                                     $catExpense = (float) $category['total_expense'];
                                     $sharePct   = $totalExpCat > 0 ? round(($catExpense / $totalExpCat) * 100, 1) : 0;
                                 ?>
-                                <div class="category-card bg-white rounded-lg shadow-sm border-l-4 border-red-400 p-4">
+                                <div class="category-card bg-white rounded-lg shadow-sm border-l-4 border-red-400 p-4"
+                                     data-type="Expense"
+                                     data-name="<?php echo htmlspecialchars($catName, ENT_QUOTES, 'UTF-8'); ?>"
+                                     data-amount="<?php echo number_format($catExpense, 2); ?>">
                                     <div class="flex justify-between items-start mb-2">
                                         <h5 class="category-title text-sm font-semibold text-gray-800">
                                             <?php echo htmlspecialchars($catName, ENT_QUOTES, 'UTF-8'); ?>
@@ -1116,25 +916,53 @@ $catStmt->close();
                 </div>
             </div>
 
-        </div><!-- end .bg-gray-100 -->
-    </div><!-- end .main-content -->
+        </div>
+    </div>
 
     <!-- ============================================================
          SCRIPTS
          ============================================================ -->
     <script>
-        /* ---------- Sidebar toggle ---------- */
+        /* ---------- Sidebar — dual-mode with no-flash restore ---------- */
         document.addEventListener('DOMContentLoaded', function () {
             const sidebarToggle = document.getElementById('sidebarToggle');
             const sidebar       = document.querySelector('.sidebar');
             const mainContent   = document.querySelector('.main-content');
+            if (!sidebarToggle) return;
 
-            if (sidebarToggle) {
-                sidebarToggle.addEventListener('click', function () {
-                    sidebar.classList.toggle('active');
-                    mainContent.classList.toggle('active');
+            const isMobile = () => window.innerWidth <= 768;
+
+            if (!isMobile() && localStorage.getItem('sidebarCollapsed') === 'true') {
+                sidebar.style.transition     = 'none';
+                mainContent.style.transition = 'none';
+                sidebar.classList.add('collapsed');
+                mainContent.classList.add('collapsed');
+                requestAnimationFrame(() => {
+                    sidebar.style.transition     = '';
+                    mainContent.style.transition = '';
                 });
             }
+
+            sidebarToggle.addEventListener('click', function () {
+                if (isMobile()) {
+                    sidebar.classList.toggle('active');
+                    mainContent.classList.toggle('active');
+                } else {
+                    const isCollapsed = sidebar.classList.toggle('collapsed');
+                    mainContent.classList.toggle('collapsed', isCollapsed);
+                    localStorage.setItem('sidebarCollapsed', isCollapsed ? 'true' : 'false');
+                }
+            });
+
+            window.addEventListener('resize', function () {
+                if (isMobile()) {
+                    sidebar.classList.remove('collapsed');
+                    mainContent.classList.remove('collapsed');
+                } else {
+                    sidebar.classList.remove('active');
+                    mainContent.classList.remove('active');
+                }
+            });
         });
 
         function confirmLogout() {
@@ -1164,6 +992,13 @@ $catStmt->close();
                 }, 10);
             }
         }
+
+        window.addEventListener('click', function (e) {
+            if (e.target === modal) toggleModal();
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') toggleModal();
+        });
     </script>
 
     <script>
@@ -1172,7 +1007,6 @@ $catStmt->close();
             const startDate  = document.getElementById('start_date').value;
             const endDate    = document.getElementById('end_date').value;
             const predictBtn = document.getElementById('predictBtn');
-
             if (startDate && endDate) {
                 predictBtn.disabled = false;
                 predictBtn.classList.remove('opacity-50', 'cursor-not-allowed');
@@ -1181,65 +1015,70 @@ $catStmt->close();
                 predictBtn.classList.add('opacity-50', 'cursor-not-allowed');
             }
         }
-
         document.getElementById('start_date').addEventListener('change', validateDates);
         document.getElementById('end_date').addEventListener('change',   validateDates);
         document.addEventListener('DOMContentLoaded', validateDates);
     </script>
 
     <script>
-        /* ---------- Print / Generate Prediction Report ---------- */
+        /* ---------- Generate Prediction Report ----------
+           Reads data-type / data-name / data-amount attributes added to each
+           category card — no fragile innerText pattern-matching needed.
+        ------------------------------------------------------------------ */
         function printPredictionReport() {
-            const predictionBox  = document.querySelector('.alert-info');
-            const summaryCards   = document.querySelectorAll('.overall-summary .summary-card');
-            const categoryCards  = document.querySelectorAll('.category-summary .category-card');
+            const predictionBox = document.querySelector('.alert-info');
+            const summaryCards  = document.querySelectorAll('.overall-summary .summary-card');
 
-            let overallTable = `
-                <h3>Overall Financial Summary</h3>
-                <table border="1" cellspacing="0" cellpadding="8" style="width:100%; margin-bottom: 20px;">
-                    <thead style="background:#f0f0f0;">
-                        <tr><th>Type</th><th>Amount (RM)</th></tr>
-                    </thead>
-                    <tbody>`;
-
+            // ── Overall summary table ──────────────────────────────────────
+            let overallRows = '';
             summaryCards.forEach(card => {
-                const label = card.querySelector('.summary-title')?.innerText || '';
-                const value = card.querySelector('.summary-value')?.innerText  || '';
-                overallTable += `<tr><td>${label}</td><td>${value}</td></tr>`;
+                const label = card.querySelector('.summary-title')?.innerText.trim() || '';
+                const value = card.querySelector('.summary-value')?.innerText.trim()  || '';
+                overallRows += `<tr><td>${label}</td><td>${value}</td></tr>`;
             });
 
-            const targetProfitValue = document.getElementById('target_profit').value;
+            const targetProfitValue = parseFloat(document.getElementById('target_profit').value) || 0;
             if (targetProfitValue > 0) {
-                overallTable += `<tr style="background:#f9fafb;"><td><strong>Target Profit</strong></td><td><strong>RM ${parseFloat(targetProfitValue).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></td></tr>`;
+                overallRows += `<tr style="background:#f9fafb;">
+                    <td><strong>Target Profit</strong></td>
+                    <td><strong>RM ${targetProfitValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></td>
+                </tr>`;
             }
 
-            overallTable += `</tbody></table>`;
+            const overallTable = `
+                <h3>Overall Financial Summary</h3>
+                <table border="1" cellspacing="0" cellpadding="8" style="width:100%; margin-bottom:20px;">
+                    <thead style="background:#f0f0f0;"><tr><th>Type</th><th>Amount (RM)</th></tr></thead>
+                    <tbody>${overallRows}</tbody>
+                </table>`;
 
-            let salesRows = '', expenseRows = '';
+            // ── Category breakdown — read from data-* attributes ──────────
+            let salesRows   = '';
+            let expenseRows = '';
 
-            categoryCards.forEach(card => {
-                const title       = card.querySelector('.category-title')?.innerText || '';
-                const valueText   = card.querySelector('.category-value')?.innerText || '';
-
-                if (valueText.includes('Total Sales')) {
-                    salesRows   += `<tr><td>${title}</td><td>${valueText.replace('Total Sales:', '').trim()}</td></tr>`;
-                } else if (valueText.includes('Total Expense')) {
-                    expenseRows += `<tr><td>${title}</td><td>${valueText.replace('Total Expense:', '').trim()}</td></tr>`;
+            document.querySelectorAll('.category-summary .category-card').forEach(card => {
+                const type   = card.dataset.type   || '';
+                const name   = card.dataset.name   || '';
+                const amount = card.dataset.amount  || '';
+                if (type === 'Sales') {
+                    salesRows   += `<tr><td>${name}</td><td>RM ${amount}</td></tr>`;
+                } else if (type === 'Expense') {
+                    expenseRows += `<tr><td>${name}</td><td>RM ${amount}</td></tr>`;
                 }
             });
 
             const salesTable = `
-                <h3>Sales Breakdown</h3>
-                <table border="1" cellspacing="0" cellpadding="8" style="width:100%; margin-bottom: 20px;">
-                    <thead style="background:#e6ffe6;"><tr><th>Category</th><th>Total (RM)</th></tr></thead>
-                    <tbody>${salesRows || '<tr><td colspan="2">No sales data available.</td></tr>'}</tbody>
+                <h3>Income Breakdown by Category</h3>
+                <table border="1" cellspacing="0" cellpadding="8" style="width:100%; margin-bottom:20px;">
+                    <thead style="background:#e6f0ff;"><tr><th>Category</th><th>Total (RM)</th></tr></thead>
+                    <tbody>${salesRows || '<tr><td colspan="2">No income category data available.</td></tr>'}</tbody>
                 </table>`;
 
             const expenseTable = `
-                <h3>Expense Breakdown</h3>
-                <table border="1" cellspacing="0" cellpadding="8" style="width:100%; margin-bottom: 20px;">
+                <h3>Expense Breakdown by Category</h3>
+                <table border="1" cellspacing="0" cellpadding="8" style="width:100%; margin-bottom:20px;">
                     <thead style="background:#ffe6e6;"><tr><th>Category</th><th>Total (RM)</th></tr></thead>
-                    <tbody>${expenseRows || '<tr><td colspan="2">No expense data available.</td></tr>'}</tbody>
+                    <tbody>${expenseRows || '<tr><td colspan="2">No expense category data available.</td></tr>'}</tbody>
                 </table>`;
 
             const printContent = `
@@ -1252,6 +1091,7 @@ $catStmt->close();
                         table { border-collapse: collapse; width: 100%; }
                         th, td { text-align: left; padding: 8px; }
                         th { background-color: #f9f9f9; }
+                        .alert-info { background:#eff6ff; border:1px solid #bfdbfe; padding:12px; border-radius:6px; margin-bottom:16px; color:#1e40af; }
                     </style>
                 </head>
                 <body>
